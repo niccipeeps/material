@@ -7,11 +7,19 @@ angular
     'material.core',
     'material.components.backdrop'
   ])
-  .service('$mdPanel', MdPanelService);
+  .provider('$mdPanel', MdPanelProvider);
 
 
 /*****************************************************************************
  *                            PUBLIC DOCUMENTATION                           *
+ *****************************************************************************/
+
+
+
+
+
+/*****************************************************************************
+ *                               MdPanel Service                             *
  *****************************************************************************/
 
 
@@ -453,15 +461,15 @@ angular
  * @returns {!MdPanelRef}
  */
 
- /**
-  * @ngdoc method
-  * @name MdPanelRef#updateAnimation
-  * @description
-  * Updates the animation configuration for a panel. You can use this to change
-  * the panel's animation without having to re-create it.
-  *
-  * @param {!MdPanelAnimation} animation
-  */
+/**
+ * @ngdoc method
+ * @name MdPanelRef#updateAnimation
+ * @description
+ * Updates the animation configuration for a panel. You can use this to change
+ * the panel's animation without having to re-create it.
+ *
+ * @param {!MdPanelAnimation} animation
+ */
 
 
 /*****************************************************************************
@@ -789,16 +797,59 @@ angular
 
 
 /*****************************************************************************
- *                                IMPLEMENTATION                             *
+ *                            PUBLIC DOCUMENTATION                           *
  *****************************************************************************/
 
 
-// Default z-index for the panel.
-var defaultZIndex = 80;
-var MD_PANEL_HIDDEN = '_md-panel-hidden';
+ var MD_PANEL_Z_INDEX = 80;
+ var MD_PANEL_HIDDEN = '_md-panel-hidden';
+ var FOCUS_TRAP_TEMPLATE = angular.element(
+     '<div class="_md-panel-focus-trap" tabindex="0"></div>');
 
-var FOCUS_TRAP_TEMPLATE = angular.element(
-    '<div class="_md-panel-focus-trap" tabindex="0"></div>');
+
+/**
+ * A provider that is used for creating presets for the panel API.
+ * @final @constructor @ngInject
+ */
+function MdPanelProvider() {
+  /** @private {!Object} */
+  this._presets = {};
+
+  return this;
+}
+
+
+/**
+ * Takes the passed in panel configuration object and adds it to the `_presets`
+ * object at the specified name.
+ * @param {string} name Name of the preset to set.
+ * @param {!Object} config Specific configuration object that can contain any
+ *     and all of the parameters avaialble within the `$mdPanel.create` method.
+ *     However, parameters that pertain to id, position, animation, and user
+ *     interaction are not allowed and will not function properly.
+ */
+MdPanelProvider.prototype.definePreset = function(name, config) {
+  if (angular.isUndefined(name) || !name ||
+      angular.isUndefined(config) || !config) {
+    throw new Error('mdPanelProvider: The panel preset definition is ' +
+        'malformed. The name and config object are required.');
+  }
+
+  this._presets[name] = config;
+};
+
+
+MdPanelProvider.prototype.$get = [
+  '$rootElement', '$rootScope', '$injector', '$window',
+  function($rootElement, $rootScope, $injector, $window) {
+    return MdPanelService.apply(this, arguments);
+  }
+];
+
+
+/*****************************************************************************
+ *                               MdPanel Service                             *
+ *****************************************************************************/
 
 
 /**
@@ -829,7 +880,7 @@ function MdPanelService($rootElement, $rootScope, $injector, $window) {
     propagateContainerEvents: false,
     transformTemplate: angular.bind(this, this._wrapTemplate),
     trapFocus: false,
-    zIndex: defaultZIndex
+    zIndex: MD_PANEL_Z_INDEX
   };
 
   /** @private {!Object} */
@@ -903,10 +954,21 @@ function MdPanelService($rootElement, $rootScope, $injector, $window) {
 
 /**
  * Creates a panel with the specified options.
+ * @param {string=} preset Name of a preset configuration that can be used to
+ *     extend the panel configuration.
  * @param {!Object=} config Configuration object for the panel.
  * @returns {!MdPanelRef}
  */
-MdPanelService.prototype.create = function(config) {
+MdPanelService.prototype.create = function(preset, config) {
+  if (typeof preset === 'string') {
+    preset = this._getPreset(preset);
+  } else if (typeof preset === 'object' &&
+      (angular.isUndefined(config) || !config)) {
+    config = preset;
+    preset = {};
+  }
+
+  preset = preset || {};
   config = config || {};
 
   // If the passed-in config contains an ID and the ID is within _trackedPanels,
@@ -921,7 +983,17 @@ MdPanelService.prototype.create = function(config) {
     scope: this._$rootScope.$new(true),
     attachTo: this._$rootElement
   };
+
+  // Combine the passed-in config along with the _defaultConfigOptions into the
+  // _config.
   angular.extend(this._config, this._defaultConfigOptions, config);
+
+  // Combine the preset config if it exists into the _config.
+  if (preset) {
+    angular.extend(this._config, preset);
+  }
+
+  console.debug(this._config);
 
   var panelRef = new MdPanelRef(this._config, this._$injector);
   this._trackedPanels[config.id] = panelRef;
@@ -942,14 +1014,32 @@ MdPanelService.prototype.create = function(config) {
 
 /**
  * Creates and opens a panel with the specified options.
+ * @param {string=} preset Name of a preset configuration that can be used to
+ *     extend the panel configuration.
  * @param {!Object=} config Configuration object for the panel.
  * @returns {!angular.$q.Promise<!MdPanelRef>} The panel created from create.
  */
-MdPanelService.prototype.open = function(config) {
-  var panelRef = this.create(config);
+MdPanelService.prototype.open = function(preset, config) {
+  var panelRef = this.create(preset, config);
   return panelRef.open().then(function() {
     return panelRef;
   });
+};
+
+
+/**
+ * Gets a specific preset configuration object saved within the `_presets` of
+ * the $mdPanelProvider.
+ * @param {string} preset Name of the preset to search for.
+ * @returns {!Object} The preset configuration object.
+ */
+MdPanelService.prototype._getPreset = function(preset) {
+  if (!this._presets[name]) {
+    throw new Error('mdPanel: The panel preset configuration that you ' +
+        'requested does not exist. Use the $mdPanelProvider to create a ' +
+        'preset before requesting one.');
+  }
+  return this._presets[name];
 };
 
 
@@ -2210,6 +2300,7 @@ MdPanelRef.prototype.removeFromGroup = function(groupName) {
   }
 };
 
+
 /**
  * Possible default closeReasons for the close function.
  * @enum {string}
@@ -2218,6 +2309,7 @@ MdPanelRef.closeReasons = {
   CLICK_OUTSIDE: 'clickOutsideToClose',
   ESCAPE: 'escapeToClose',
 };
+
 
 /*****************************************************************************
  *                               MdPanelPosition                             *
